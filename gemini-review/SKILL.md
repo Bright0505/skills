@@ -134,10 +134,10 @@ cat > "$prompt_file" <<'PROMPT_EOF'
 <完整 prompt 內容>
 PROMPT_EOF
 
-gemini -p "$(cat "$prompt_file")" \
+GEMINI_CLI_TRUST_WORKSPACE=true gemini -p "$(cat "$prompt_file")" \
   --output-format text \
   --approval-mode plan \
-  --model gemini-3.1-pro-preview \
+  --model gemini-2.5-pro \
   > "$review_output" 2>&1
 
 rm -f "$prompt_file"
@@ -201,7 +201,7 @@ echo "REVIEW_OUTPUT=$review_output"
 | Gemini 退出碼非 0 | 顯示 `$review_output` 給用戶並停下 |
 | 輸出無 `## Summary` 或無 `## F` heading | 把原文丟給用戶，問要不要手動處理 |
 | 輸出含 `No issues found.` | 告知用戶「Gemini 無發現問題」，結束 |
-| 模型 `gemini-3.1-pro-preview` 不可用 | 提示用戶用其他模型重試（如 `--model gemini-2.5-pro`） |
+| 模型 `gemini-2.5-pro` 不可用或 429 | 提示用戶稍後重試，或改用 `--model gemini-2.5-flash` |
 
 ---
 
