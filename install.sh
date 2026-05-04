@@ -2,14 +2,14 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GLOBAL_SKILLS_DIR="$HOME/.claude/skills"
-GLOBAL_SCRIPTS_DIR="$HOME/.claude/skill-scripts"
 
 usage() {
   echo "用法："
-  echo "  ./install.sh                         # 互動式選擇"
-  echo "  ./install.sh <skill-name>            # 安裝到全域 (~/.claude/skills/)"
-  echo "  ./install.sh <skill-name> --project  # 安裝到當前專案 (.claude/skills/)"
+  echo "  ./install.sh                                  # 互動式選擇"
+  echo "  ./install.sh <skill-name>                     # 安裝到 Claude Code (~/.claude/skills/)"
+  echo "  ./install.sh <skill-name> --project           # 安裝到當前專案 (.claude/skills/)"
+  echo "  ./install.sh <skill-name> --agents            # 安裝到中性路徑 (~/.agents/skills/)"
+  echo "  ./install.sh <skill-name> --agents --project  # 安裝到當前專案 (.agents/skills/)"
   exit 1
 }
 
@@ -26,6 +26,7 @@ find_skills() {
 install_skill() {
   local skill_name="$1"
   local target_dir="$2"
+  local scripts_base="$3"
   local skill_dir="$REPO_DIR/$skill_name"
 
   if [[ ! -d "$skill_dir" ]]; then
@@ -44,7 +45,7 @@ install_skill() {
 
   # 若有腳本則一併安裝
   if [[ -d "$skill_dir/scripts" ]] && compgen -G "$skill_dir/scripts/*" > /dev/null 2>&1; then
-    local scripts_target="$GLOBAL_SCRIPTS_DIR/$skill_name"
+    local scripts_target="$scripts_base/$skill_name"
     mkdir -p "$scripts_target"
     cp -r "$skill_dir/scripts/." "$scripts_target/"
     echo "✓ scripts 已安裝到 $scripts_target/"
@@ -58,20 +59,34 @@ install_skill() {
 
 skill_name=""
 project_mode=false
+agents_mode=false
 
 for arg in "$@"; do
   case "$arg" in
     --project) project_mode=true ;;
+    --agents)  agents_mode=true ;;
     --help|-h) usage ;;
     -*) echo "未知選項：$arg"; usage ;;
     *) skill_name="$arg" ;;
   esac
 done
 
-if $project_mode; then
-  target_dir="$(pwd)/.claude/skills"
+if $agents_mode; then
+  if $project_mode; then
+    target_dir="$(pwd)/.agents/skills"
+    scripts_base="$(pwd)/.agents/skill-scripts"
+  else
+    target_dir="$HOME/.agents/skills"
+    scripts_base="$HOME/.agents/skill-scripts"
+  fi
 else
-  target_dir="$GLOBAL_SKILLS_DIR"
+  if $project_mode; then
+    target_dir="$(pwd)/.claude/skills"
+    scripts_base="$(pwd)/.claude/skill-scripts"
+  else
+    target_dir="$HOME/.claude/skills"
+    scripts_base="$HOME/.claude/skill-scripts"
+  fi
 fi
 
 # 若未指定 skill，進入互動式選單
@@ -100,4 +115,4 @@ if [[ -z "$skill_name" ]]; then
   IFS='|' read -r skill_name _ <<< "${skills[$((choice-1))]}"
 fi
 
-install_skill "$skill_name" "$target_dir"
+install_skill "$skill_name" "$target_dir" "$scripts_base"

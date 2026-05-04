@@ -25,11 +25,17 @@ chmod +x install.sh
 ### 直接指定
 
 ```bash
-# 安裝到全域 (~/.claude/skills/)
+# 預設：安裝到 Claude Code 全域 (~/.claude/skills/)
 ./install.sh gemini-review
 
 # 安裝到當前專案 (.claude/skills/)
 ./install.sh gemini-review --project
+
+# 安裝到中性路徑，供 Copilot CLI / Codex 使用 (~/.agents/skills/)
+./install.sh gemini-review --agents
+
+# 安裝到當前專案的中性路徑 (.agents/skills/)
+./install.sh gemini-review --agents --project
 ```
 
 ## 新增 Skill
