@@ -91,7 +91,10 @@ fi
 
 # 若未指定 skill，進入互動式選單
 if [[ -z "$skill_name" ]]; then
-  mapfile -t skills < <(find_skills)
+  skills=()
+  while IFS= read -r line; do
+    skills+=("$line")
+  done < <(find_skills)
 
   if [[ ${#skills[@]} -eq 0 ]]; then
     echo "此 repo 中找不到任何 skill。" >&2
@@ -105,14 +108,44 @@ if [[ -z "$skill_name" ]]; then
     printf "  %d. %-20s %s\n" $((i+1)) "$name" "$desc"
   done
   echo ""
-  read -rp "請選擇 (1-${#skills[@]}): " choice
+  read -rp "請選擇 (例：1 / 1,3 / 1-3): " choice
 
-  if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#skills[@]} )); then
-    echo "無效選擇" >&2
-    exit 1
-  fi
+  # 展開選擇為 index 清單（1-based）
+  selected=()
+  IFS=',' read -ra parts <<< "$choice"
+  for part in "${parts[@]}"; do
+    part="${part// /}"
+    if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+      from="${BASH_REMATCH[1]}"
+      to="${BASH_REMATCH[2]}"
+      if (( from > to )); then
+        echo "無效範圍：$part（需從小到大）" >&2
+        exit 1
+      fi
+      for (( n=from; n<=to; n++ )); do selected+=("$n"); done
+    elif [[ "$part" =~ ^[0-9]+$ ]]; then
+      selected+=("$part")
+    else
+      echo "無效輸入：$part" >&2
+      exit 1
+    fi
+  done
 
-  IFS='|' read -r skill_name _ <<< "${skills[$((choice-1))]}"
+  # 去重並排序
+  unique_selected=()
+  while IFS= read -r idx; do
+    unique_selected+=("$idx")
+  done < <(printf '%s\n' "${selected[@]}" | sort -un)
+
+  for idx in "${unique_selected[@]}"; do
+    if (( idx < 1 || idx > ${#skills[@]} )); then
+      echo "超出範圍：$idx（共 ${#skills[@]} 個）" >&2
+      exit 1
+    fi
+    IFS='|' read -r skill_name _ <<< "${skills[$((idx-1))]}"
+    install_skill "$skill_name" "$target_dir" "$scripts_base"
+  done
+  exit 0
 fi
 
 install_skill "$skill_name" "$target_dir" "$scripts_base"
