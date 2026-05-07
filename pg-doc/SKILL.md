@@ -141,10 +141,64 @@ python3 ~/.claude/skill-scripts/pg-doc/pg_doc.py mv-deps \
 
 讓 Claude 接著能根據結果補充說明、串接後續任務。
 
-## 待實作（Phase 2）
+## Workflow D：Column Search（欄位反查）
 
-- `column-search`：欄位反查
-- `size`：大小 + 冷熱分析
-- `lineage`：遞迴 lineage 樹 + Mermaid
+```bash
+python3 ~/.claude/skill-scripts/pg-doc/pg_doc.py column-search \
+    --column=cus_no \
+    --output=docs/pg
+```
 
-實作後會補在 `pg_doc.py` 的 subcommand。
+輸出：`docs/pg/column-search/<column>.md`，含
+- Summary：哪些表有這個欄位 + 表 comment
+- Detail：每張表的欄位完整資訊（型態、可否 null、預設值、欄位 comment）
+
+可用旗標：
+- `--column`：欄位名稱（必填）
+- `--exact`：完整符合（預設）
+- `--like`：SQL LIKE 模式（如 `%_no`）
+- `--regex`：PostgreSQL `~*` 大小寫不分正則
+- `--schema`：schema（預設 `public`）
+
+## Workflow E：Table Size & Activity
+
+```bash
+python3 ~/.claude/skill-scripts/pg-doc/pg_doc.py size \
+    --top=30 \
+    --cold-days=90 \
+    --prefix=huaying_ \
+    --output=docs/pg
+```
+
+輸出：`docs/pg/size/<timestamp>.md`，含
+- 大小排行（Total / Table / Index / Live rows）
+- Last access 時間（`last_seq_scan` 與 `last_idx_scan` 取大）
+- Cold tables 清單（超過 N 天無存取）
+
+可用旗標：
+- `--top`：顯示前幾大（預設 30）
+- `--cold-days`：幾天沒存取算冷表（預設 90）
+- `--prefix`：只看特定前綴的表
+
+注意：`last_access` 來自 `pg_stat_user_tables`，若 PG 重啟後統計清零則顯示 `never`，不代表真的從未用過。
+
+## Workflow F：Lineage 樹
+
+```bash
+python3 ~/.claude/skill-scripts/pg-doc/pg_doc.py lineage \
+    --view=mv_rp830 \
+    --output=docs/pg
+```
+
+輸出：`docs/pg/lineage/<view>.md`，含
+- Mermaid graph（rectangle = view/MV，double-circle = base table）
+- 縮排樹（含 comment、cycle 標記）
+- Base tables 清單
+
+可用旗標：
+- `--view`：起始 view/MV 名（必填）
+- `--max-depth`：最大遞迴深度（預設 10）
+- `--schema`：schema（預設 `public`）
+
+注意：遞迴只展開 `relkind IN ('v','m')`（view / matview），普通表作為葉節點停止。
+Cycle 偵測：遇到已走訪節點會標記 `*(cycle)*` 而非無限遞迴。
