@@ -7,6 +7,7 @@ Claude Code skills 的集中管理倉庫。
 | Name | Description |
 |------|-------------|
 | [gemini-review](./gemini-review/) | Gemini 二次 code review，提供獨立第二意見 |
+| [pg-doc](./pg-doc/) | PostgreSQL schema 文件、依賴與 lineage 分析助手 |
 
 ## 安裝
 

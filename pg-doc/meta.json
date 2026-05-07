@@ -1,0 +1,6 @@
+{
+  "name": "pg-doc",
+  "description": "PostgreSQL schema 文件、依賴分析與 lineage 助手；產出 table 清單、欄位文件、MV 依賴頻率、欄位反查、冷熱表、完整 lineage 圖",
+  "version": "0.1.0",
+  "tags": ["postgresql", "schema", "documentation", "lineage", "mv"]
+}
