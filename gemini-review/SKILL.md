@@ -1,12 +1,12 @@
 ---
 name: gemini-review
-description: 用 Gemini CLI 對當前 plan 與 git 異動執行第三方 review，整理 findings 後與用戶討論修改。
+description: 用 Antigravity CLI (agy) 對當前 plan 與 git 異動執行第三方 review，整理 findings 後與用戶討論修改。
 disable-model-invocation: true
 ---
 
 # Gemini Review Skill
 
-呼叫第二個模型（Gemini）對「當前計劃 + git 異動」做獨立審視，補捉 Claude 自己看不到的盲區。
+呼叫第二個模型（Gemini，透過 Antigravity CLI）對「當前計劃 + git 異動」做獨立審視，補捉 Claude 自己看不到的盲區。
 
 ## 用法
 
@@ -46,15 +46,15 @@ disable-model-invocation: true
 - `findings_history`：每輪 Gemini findings 全文，供驗證 prompt 與震盪比對
 - `actionable_trend`：每輪結束時待修 (high+medium) 數量陣列，供軟上限檢查點顯示趨勢
 
-### Step 2 — 確認 Gemini 可用
+### Step 2 — 確認 Antigravity CLI 可用
 
 ```bash
-which gemini || echo "MISSING"
+which agy || echo "MISSING"
 ```
 
 若 `MISSING` → 中止並提示用戶：
 
-> Gemini CLI 未安裝。請執行 `npm install -g @google/gemini-cli`，然後重試。
+> Antigravity CLI 未安裝。請執行 `curl -fsSL https://antigravity.google/cli/install.sh | bash`，然後重試。
 
 ### Step 3 — 蒐集材料
 
@@ -182,19 +182,18 @@ cat > "$prompt_file" <<'PROMPT_EOF'
 <round == 1 用 Step 4 初審模板；round ≥ 2 用 Step 4b 驗證模板>
 PROMPT_EOF
 
-run_gemini() {
-  GEMINI_CLI_TRUST_WORKSPACE=true gemini -p "$(cat "$prompt_file")" \
-    --output-format text \
-    --approval-mode plan \
+run_agy() {
+  agy -p "$(cat "$prompt_file")" \
+    --sandbox \
     --model "$1" \
     > "$review_output" 2>&1
 }
 
 model_used="gemini-3.1-pro-preview"
-if ! run_gemini "$model_used"; then
+if ! run_agy "$model_used"; then
   # pro-preview 不可用（model-not-found / quota / 429 / 退出碼非 0）→ 自動降級
   model_used="gemini-3.5-flash"
-  run_gemini "$model_used"
+  run_agy "$model_used"
 fi
 
 rm -f "$prompt_file"
@@ -203,10 +202,10 @@ echo "REVIEW_OUTPUT=$review_output"
 ```
 
 注意：
-- `--approval-mode plan` 強制 read-only
-- `--output-format text` → stdout 即模型 markdown
+- `--sandbox` 強制 read-only（agy 的沙箱模式，取代舊的 `--approval-mode plan`）
+- `agy -p` 直接輸出 plain text，無需 `--output-format` flag
 - 主模型 `gemini-3.1-pro-preview`，失敗時**自動**降級 `gemini-3.5-flash`
-- 每輪都用同一個 `run_gemini()`（含降級）；每輪 `$review_output` 各自 mktemp、全部保留
+- 每輪都用同一個 `run_agy()`（含降級）；每輪 `$review_output` 各自 mktemp、全部保留
 
 若兩個模型都退出碼非 0 → 把 `$review_output` 內容顯示給用戶並停下。Step 6 呈現時用 `$model_used` 告知用戶這次實際用了哪個模型。
 
@@ -254,7 +253,7 @@ echo "REVIEW_OUTPUT=$review_output"
 
 1. **問用戶是否進驗證輪**：用 AskUserQuestion 問「要把這次修正送 Gemini 驗證嗎？」（進驗證輪 / 直接收尾）。選「直接收尾」→ Step 7。
 
-2. 選「進驗證輪」→ `round += 1`，回 **Step 4b** 組驗證 prompt → **Step 5** 跑（同 `run_gemini` 降級）→ **Step 6** 解析。取得 `## Verdict` 後判斷：
+2. 選「進驗證輪」→ `round += 1`，回 **Step 4b** 組驗證 prompt → **Step 5** 跑（同 `run_agy` 降級）→ **Step 6** 解析。取得 `## Verdict` 後判斷：
 
    | Verdict / 情況 | 動作 |
    |------|------|
@@ -286,7 +285,7 @@ echo "REVIEW_OUTPUT=$review_output"
 
 | 狀況 | 處理 |
 |------|------|
-| `gemini` 指令不存在 | 提示 `npm install -g @google/gemini-cli` 並停下 |
+| `agy` 指令不存在 | 提示 `curl -fsSL https://antigravity.google/cli/install.sh \| bash` 並停下 |
 | Base branch 不存在 | 報錯停下 |
 | Plan 路徑不存在 | 警告但繼續（當作無 plan） |
 | Gemini 退出碼非 0 | 顯示 `$review_output` 給用戶並停下 |
@@ -301,7 +300,7 @@ echo "REVIEW_OUTPUT=$review_output"
 ## 設計理由
 
 - **跨專案通用**：本 skill 只用 git + 檔案系統概念，無任何專案特定路徑或 hardcoded 假設
-- **Read-only Gemini**：`--approval-mode plan` 防 Gemini 動檔；只有 Claude 在用戶確認後才寫
+- **Read-only agy**：`--sandbox` 讓 agy 在沙箱中執行（取代舊的 `--approval-mode plan`）；只有 Claude 在用戶確認後才寫
 - **Markdown 而非 JSON**：節省 token、無 escape 問題、stdout 直接可讀，regex 解析仍然穩定
 - **暫存檔輸出**：Gemini 輸出可能很長，存檔再用 Read 讀比塞進 Bash 結果欄位乾淨
 - **驗證取代重審**：第二輪起帶「上輪 findings + 修正摘要 + 只查新增碼」，把 round ≥ 2 從「全新審查」降成「驗證」，新問題只來自有限的修正本身，數學上收斂——根治無狀態重審的無限掃描
