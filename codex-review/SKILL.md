@@ -1,30 +1,30 @@
 ---
-name: gemini-review
-description: 用 Gemini CLI 對當前 plan 與 git 異動執行第三方 review，整理 findings 後與用戶討論修改。
+name: codex-review
+description: 用 Codex CLI 對當前 plan 與 git 異動執行第三方 review，整理 findings 後與用戶討論修改。
 disable-model-invocation: true
 ---
 
-# Gemini Review Skill
+# Codex Review Skill
 
-呼叫第二個模型（Gemini）對「當前計劃 + git 異動」做獨立審視，補捉 Claude 自己看不到的盲區。
+呼叫第二個模型（Codex / GPT）對「當前計劃 + git 異動」做獨立審視，補捉 Claude 自己看不到的盲區。與 `gemini-review` 是平行的姊妹 skill，引擎不同、流程一致，不混用。
 
 ## 用法
 
 ```
-/gemini-review [<plan-file-path>] [--base <branch>] [--max-rounds <N>]
+/codex-review [<plan-file-path>] [--base <branch>] [--max-rounds <N>]
 ```
 
 | 參數 | 說明 |
 |------|------|
-| `<plan-file-path>` | 可選。要送給 Gemini 的計畫檔（任意 .md 路徑） |
+| `<plan-file-path>` | 可選。要送給 Codex 的計畫檔（任意 .md 路徑） |
 | `--base <branch>` | 可選。Diff 比對的 base，預設 `main` |
 | `--max-rounds <N>` | 可選。共識驗證的軟上限輪數（含初審），預設 `3`。到上限不會默默停，而是攤出趨勢問用戶 |
 
 範例：
-- `/gemini-review` — review 當前 vs main 的所有異動
-- `/gemini-review ~/.claude/plans/3-foo.md` — 帶 plan
-- `/gemini-review ~/.claude/plans/3-foo.md --base dev` — 從 dev 拉的 feature
-- `/gemini-review --max-rounds 2` — 驗證軟上限設 2 輪
+- `/codex-review` — review 當前 vs main 的所有異動
+- `/codex-review ~/.claude/plans/3-foo.md` — 帶 plan
+- `/codex-review ~/.claude/plans/3-foo.md --base dev` — 從 dev 拉的 feature
+- `/codex-review --max-rounds 2` — 驗證軟上限設 2 輪
 
 ---
 
@@ -43,18 +43,18 @@ disable-model-invocation: true
 
 初始化共識迴圈狀態（Claude 在上下文中維護，不需落地成檔）：
 - `round = 1`
-- `findings_history`：每輪 Gemini findings 全文，供驗證 prompt 與震盪比對
+- `findings_history`：每輪 Codex findings 全文，供驗證 prompt 與震盪比對
 - `actionable_trend`：每輪結束時待修 (high+medium) 數量陣列，供軟上限檢查點顯示趨勢
 
-### Step 2 — 確認 Gemini 可用
+### Step 2 — 確認 Codex 可用
 
 ```bash
-which gemini || echo "MISSING"
+which codex || echo "MISSING"
 ```
 
 若 `MISSING` → 中止並提示用戶：
 
-> Gemini CLI 未安裝。請執行 `npm install -g @google/gemini-cli`，然後重試。
+> Codex CLI 未安裝。請執行 `npm install -g @openai/codex`，然後重試。
 
 ### Step 3 — 蒐集材料
 
@@ -170,45 +170,48 @@ RESOLVED | CONVERGING | NEEDS_WORK
 （RESOLVED = 處理項全解決且無新回歸；CONVERGING = 主要已解決、殘留僅 low/次要；NEEDS_WORK = 有 high/medium 回歸或未解決項）
 ```
 
-### Step 5 — 執行 Gemini
+### Step 5 — 執行 Codex
 
-用暫存檔餵 prompt（避免 argv 過長）：
+用暫存檔餵 prompt（避免 argv 過長），並用 `--output-last-message` 把模型最終訊息獨立寫檔：
 
 ```bash
-prompt_file=$(mktemp -t gemini-review-prompt.XXXXXX)
-review_output=$(mktemp -t gemini-review-output.XXXXXX.md)
+prompt_file=$(mktemp -t codex-review-prompt.XXXXXX)
+review_output=$(mktemp -t codex-review-output.XXXXXX.md)
+review_log=$(mktemp -t codex-review-log.XXXXXX)
 
 cat > "$prompt_file" <<'PROMPT_EOF'
 <round == 1 用 Step 4 初審模板；round ≥ 2 用 Step 4b 驗證模板>
 PROMPT_EOF
 
-run_gemini() {
-  GEMINI_CLI_TRUST_WORKSPACE=true gemini -p "$(cat "$prompt_file")" \
-    --output-format text \
-    --approval-mode plan \
+run_codex() {
+  codex exec "$(cat "$prompt_file")" \
+    --sandbox read-only \
     --model "$1" \
-    > "$review_output" 2>&1
+    --output-last-message "$review_output" \
+    > "$review_log" 2>&1
 }
 
-model_used="gemini-3.1-pro-preview"
-if ! run_gemini "$model_used"; then
-  # pro-preview 不可用（model-not-found / quota / 429 / 退出碼非 0）→ 自動降級
-  model_used="gemini-3.5-flash"
-  run_gemini "$model_used"
+model_used="gpt-5.1-codex"
+if ! run_codex "$model_used" || [ ! -s "$review_output" ]; then
+  # pro 模型不可用（model-not-found / quota / 退出碼非 0 / 最終訊息為空）→ 自動降級
+  model_used="gpt-5.1-codex-mini"
+  run_codex "$model_used"
 fi
 
 rm -f "$prompt_file"
 echo "MODEL_USED=$model_used"
 echo "REVIEW_OUTPUT=$review_output"
+echo "REVIEW_LOG=$review_log"
 ```
 
 注意：
-- `--approval-mode plan` 強制 read-only
-- `--output-format text` → stdout 即模型 markdown
-- 主模型 `gemini-3.1-pro-preview`，失敗時**自動**降級 `gemini-3.5-flash`
-- 每輪都用同一個 `run_gemini()`（含降級）；每輪 `$review_output` 各自 mktemp、全部保留
+- `--sandbox read-only` 強制唯讀，Codex 不會動任何檔案
+- `--output-last-message "$review_output"` → 只寫模型最終訊息（乾淨 markdown，給 Step 6 解析）
+- `codex exec` 是非互動模式，跑到完成不會中途要授權；事件/log 導到 `$review_log`
+- 主模型 `gpt-5.1-codex`，失敗或最終訊息為空時**自動**降級 `gpt-5.1-codex-mini`
+- 每輪都用同一個 `run_codex()`（含降級）；每輪 `$review_output` / `$review_log` 各自 mktemp、全部保留
 
-若兩個模型都退出碼非 0 → 把 `$review_output` 內容顯示給用戶並停下。Step 6 呈現時用 `$model_used` 告知用戶這次實際用了哪個模型。
+若兩個模型都退出碼非 0（或最終訊息皆為空）→ 把 `$review_log` 內容顯示給用戶並停下。Step 6 呈現時用 `$model_used` 告知用戶這次實際用了哪個模型。
 
 ### Step 6 — 解析輸出 + 呈現
 
@@ -220,7 +223,7 @@ echo "REVIEW_OUTPUT=$review_output"
 4. 按 severity 分組（high → medium → low）顯示，例如：
 
 ```
-## Gemini Review 結果
+## Codex Review 結果
 
 **Model**: <model_used>
 
@@ -246,24 +249,24 @@ echo "REVIEW_OUTPUT=$review_output"
 
 6. 按勾選結果逐筆執行修改（Edit / Write）。每完成一筆向用戶回報。記下本輪實際修了哪些 F###（供 Step 4b 驗證 prompt 的「修正摘要」與 Step 6b 震盪比對用）。記 `actionable_trend` 追加本輪剩餘待修 (high+medium) 數。
 
-7. 若本輪用戶**未勾選任何 finding**（或 Gemini 本就 `No issues found.`）→ 直接進 Step 7 收尾，不進驗證輪。
+7. 若本輪用戶**未勾選任何 finding**（或 Codex 本就 `No issues found.`）→ 直接進 Step 7 收尾，不進驗證輪。
 
 ### Step 6b — 共識驗證迴圈（終結判斷）
 
 本輪有實際修正後，依序處理：
 
-1. **問用戶是否進驗證輪**：用 AskUserQuestion 問「要把這次修正送 Gemini 驗證嗎？」（進驗證輪 / 直接收尾）。選「直接收尾」→ Step 7。
+1. **問用戶是否進驗證輪**：用 AskUserQuestion 問「要把這次修正送 Codex 驗證嗎？」（進驗證輪 / 直接收尾）。選「直接收尾」→ Step 7。
 
-2. 選「進驗證輪」→ `round += 1`，回 **Step 4b** 組驗證 prompt → **Step 5** 跑（同 `run_gemini` 降級）→ **Step 6** 解析。取得 `## Verdict` 後判斷：
+2. 選「進驗證輪」→ `round += 1`，回 **Step 4b** 組驗證 prompt → **Step 5** 跑（同 `run_codex` 降級）→ **Step 6** 解析。取得 `## Verdict` 後判斷：
 
    | Verdict / 情況 | 動作 |
    |------|------|
-   | **RESOLVED** | 停。回報「Gemini 確認修正完成、無新回歸」→ Step 7 |
+   | **RESOLVED** | 停。回報「Codex 確認修正完成、無新回歸」→ Step 7 |
    | **CONVERGING** | 停。把殘留 low/次要項列給用戶（不再自動修）→ Step 7 |
    | **CONTESTED**（震盪，優先於 NEEDS_WORK 判斷） | 見第 3 點 |
    | **NEEDS_WORK 且非震盪** | 回 Step 6 呈現 `## Regressions` 的新 findings 供勾選 → 修 → 回到本步驟第 1 點（再問是否驗證） |
 
-3. **震盪偵測 (CONTESTED)**：若 `## Regressions` 中任一新 finding 命中**之前輪次已修過的同一 file:loc 或同一主題**（比對 `findings_history` 與「本輪修了哪些」記錄）→ 判定震盪。**停掉自動迴圈**，把 Gemini 的意見與 Claude 的修正理由兩邊並陳，用 AskUserQuestion 交用戶一刀切：採 Gemini 說法再改 / 維持 Claude 現狀 / 自己手動處理。處理完即 Step 7（不再自動續輪）。
+3. **震盪偵測 (CONTESTED)**：若 `## Regressions` 中任一新 finding 命中**之前輪次已修過的同一 file:loc 或同一主題**（比對 `findings_history` 與「本輪修了哪些」記錄）→ 判定震盪。**停掉自動迴圈**，把 Codex 的意見與 Claude 的修正理由兩邊並陳，用 AskUserQuestion 交用戶一刀切：採 Codex 說法再改 / 維持 Claude 現狀 / 自己手動處理。處理完即 Step 7（不再自動續輪）。
 
 4. **軟上限檢查點**：每次「即將再起新一輪驗證」前，若 `round >= max_rounds` 且尚未 RESOLVED/CONVERGING → **不默默停**，顯示趨勢並用 AskUserQuestion 問：
 
@@ -278,7 +281,7 @@ echo "REVIEW_OUTPUT=$review_output"
 
 - 簡短總結含輪次：「共 N 輪，最終 Verdict = X，處理 P 筆、跳過 Q 筆、爭議交付 R 筆」
 - 不自動 commit，提醒用戶自行 commit/push
-- 每輪的 `$review_output` 都留在 `/tmp`（mktemp 預設位置，各輪檔名不同），讓用戶之後若想回顧仍找得到；逐一告訴用戶路徑
+- 每輪的 `$review_output` / `$review_log` 都留在 `/tmp`（mktemp 預設位置，各輪檔名不同），讓用戶之後若想回顧仍找得到；逐一告訴用戶路徑
 
 ---
 
@@ -286,23 +289,24 @@ echo "REVIEW_OUTPUT=$review_output"
 
 | 狀況 | 處理 |
 |------|------|
-| `gemini` 指令不存在 | 提示 `npm install -g @google/gemini-cli` 並停下 |
+| `codex` 指令不存在 | 提示 `npm install -g @openai/codex` 並停下 |
 | Base branch 不存在 | 報錯停下 |
 | Plan 路徑不存在 | 警告但繼續（當作無 plan） |
-| Gemini 退出碼非 0 | 顯示 `$review_output` 給用戶並停下 |
+| Codex 退出碼非 0 或最終訊息為空 | 顯示 `$review_log` 給用戶並停下 |
 | 輸出無 `## Summary` 或無 `## F` heading | 把原文丟給用戶，問要不要手動處理 |
-| 輸出含 `No issues found.` | 告知用戶「Gemini 無發現問題」，結束 |
-| `gemini-3.1-pro-preview` 不可用或 429 | 自動降級 `gemini-3.5-flash` 重跑；兩者皆失敗才停下並顯示 `$review_output` |
+| 輸出含 `No issues found.` | 告知用戶「Codex 無發現問題」，結束 |
+| `gpt-5.1-codex` 不可用或配額用盡 | 自動降級 `gpt-5.1-codex-mini` 重跑；兩者皆失敗才停下並顯示 `$review_log` |
 | 驗證輪缺 `## Verdict` 或格式不符 | 把該輪原文丟給用戶，問要不要手動判定收斂 |
-| 偵測到 CONTESTED 震盪 | 停自動迴圈，Gemini 意見與 Claude 理由兩邊並陳，交用戶裁決 |
+| 偵測到 CONTESTED 震盪 | 停自動迴圈，Codex 意見與 Claude 理由兩邊並陳，交用戶裁決 |
 
 ---
 
 ## 設計理由
 
 - **跨專案通用**：本 skill 只用 git + 檔案系統概念，無任何專案特定路徑或 hardcoded 假設
-- **Read-only Gemini**：`--approval-mode plan` 防 Gemini 動檔；只有 Claude 在用戶確認後才寫
-- **Markdown 而非 JSON**：節省 token、無 escape 問題、stdout 直接可讀，regex 解析仍然穩定
-- **暫存檔輸出**：Gemini 輸出可能很長，存檔再用 Read 讀比塞進 Bash 結果欄位乾淨
+- **Read-only Codex**：`--sandbox read-only` 防 Codex 動檔；只有 Claude 在用戶確認後才寫
+- **獨立姊妹 skill**：與 `gemini-review` 不混用——不同引擎旗標/auth/輸出慣例差異大，各自一支 SKILL.md 比塞 `--engine` 開關乾淨
+- **`--output-last-message` 取乾淨輸出**：`codex exec` 的事件 log 與最終訊息分流，最終訊息獨立寫檔，解析時不受 log 雜訊干擾
+- **Markdown 而非 JSON**：節省 token、無 escape 問題、可讀，regex 解析仍然穩定
 - **驗證取代重審**：第二輪起帶「上輪 findings + 修正摘要 + 只查新增碼」，把 round ≥ 2 從「全新審查」降成「驗證」，新問題只來自有限的修正本身，數學上收斂——根治無狀態重審的無限掃描
 - **共識而非數字**：RESOLVED/CONVERGING 是機器間達成「沒事了」；CONTESTED 是機器吵不定時把裁決權交回用戶；軟上限只負責「該回頭問用戶」，停不停看趨勢由用戶決定，不鎖死也不放任

@@ -1,0 +1,6 @@
+{
+  "name": "codex-review",
+  "description": "Codex 二次 code review，提供獨立第二意見",
+  "version": "1.0.0",
+  "tags": ["review", "ai", "codex"]
+}
